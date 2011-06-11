@@ -41,6 +41,7 @@ from radicale import client, config, ical
 NAMESPACES = {
     "C": "urn:ietf:params:xml:ns:caldav",
     "D": "DAV:",
+    "CD": "urn:ietf:params:xml:ns:carddav",
     "CS": "http://calendarserver.org/ns/",
     "ICAL": "http://apple.com/ns/ical/",
     "ME": "http://me.com/_namespace/"}
@@ -231,6 +232,7 @@ def _propfind_response(path, item, props, user):
         elif tag in (
             _tag("D", "principal-collection-set"),
             _tag("C", "calendar-user-address-set"),
+            _tag("CD", "addressbook-home-set"),
             _tag("C", "calendar-home-set")):
             tag = ET.Element(_tag("D", "href"))
             tag.text = path
