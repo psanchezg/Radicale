@@ -56,6 +56,14 @@ def serialize(headers=(), items=(), vType="VCALENDAR"):
     lines.append("END:%s\n" % vType)
     return "\n".join(lines)
 
+def serialize_vcard(card):
+    """Serialize vCard and remove internal properties."""
+    lines = []
+    for line in unfold(card.text):
+        if line.startswith("X-RADICALE-NAME:"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 def unfold(text):
     """Unfold multi-lines attributes.
@@ -227,7 +235,6 @@ class DavItem(object):
                 else:
                     if include_container:
                         result.append(calendar)
-                    log.LOGGER.debug("--> get the components!")
                     result.extend(calendar.components)
         return result
 

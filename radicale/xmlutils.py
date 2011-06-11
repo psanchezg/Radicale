@@ -431,7 +431,7 @@ def report(path, xml_request, calendar):
     props = [prop.tag for prop in prop_element]
 
     if calendar:
-        if root.tag == _tag("C", "calendar-multiget"):
+        if root.tag == _tag("C", "calendar-multiget") or root.tag == _tag("CD", "addressbook-multiget"):
             # Read rfc4791-7.9 for info
             hreferences = set(
                 href_element.text for href_element
@@ -478,6 +478,9 @@ def report(path, xml_request, calendar):
                     if isinstance(item, (ical.Event, ical.Todo, ical.Journal)):
                         element.text = ical.serialize(
                             calendar.headers, calendar.timezones + [item])
+                elif tag == _tag("CD", "address-data"):
+                    if isinstance(item, ical.Card):
+                        element.text = ical.serialize_vcard(item) 
                 prop.append(element)
 
             status = ET.Element(_tag("D", "status"))
