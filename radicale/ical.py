@@ -167,7 +167,7 @@ class Calendar(object):
         self.encoding = "utf-8"
         split_path = path.split("/")
         self.owner = split_path[0] if len(split_path) > 1 else None
-        self.path = os.path.join(FOLDER, path.replace("/", os.sep))
+        self.path = os.path.join(FOLDER, path.replace("/", os.sep)) 
         self.local_path = path if path != '.' else ''
         self.is_principal = principal
 
@@ -209,14 +209,23 @@ class Calendar(object):
                     # directory does not exist yet
                     pass
         else:
-            calendar = cls(path)
-            if depth == "0":
-                result.append(calendar)
-            else:
-                if include_container:
+            if cls.resource_exists(path):
+                calendar = cls(path)
+                if depth == "0":
                     result.append(calendar)
-                result.extend(calendar.components)
+                else:
+                    if include_container:
+                        result.append(calendar)
+                    result.extend(calendar.components)
         return result
+
+    @staticmethod
+    def resource_exists(path):
+        """Check if resource ``path'' exists on disk."""
+        abs_path = os.path.join(FOLDER, path.replace("/", os.sep))
+        if not os.path.isfile(abs_path):
+            return False
+        return True
 
     @staticmethod
     def is_vcalendar(path):

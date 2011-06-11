@@ -157,6 +157,16 @@ class Application(object):
         items = ical.Calendar.from_path(environ["PATH_INFO"],
             environ.get("HTTP_DEPTH", "0"))
 
+        # Resource does not exist, return 404
+        # Note: should check ACL first, otherwise this can leak information (404 vs not authorized)
+        if not items:
+            log.LOGGER.debug("No items: resource %s does not exist" % environ["PATH_INFO"])
+            status = client.NOT_FOUND
+            headers = {}
+            status = "%i %s" % (status, client.responses.get(status, ""))
+            start_response(status, list(headers.items()))
+            return []
+
         # Get function corresponding to method
         function = getattr(self, environ["REQUEST_METHOD"].lower())
 
