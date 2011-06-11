@@ -35,7 +35,7 @@ except ImportError:
 import re
 import xml.etree.ElementTree as ET
 
-from radicale import client, config, ical, log
+from radicale import client, config, ical 
 
 
 NAMESPACES = {
@@ -409,7 +409,6 @@ def proppatch(path, xml_request, calendar):
 def put(path, ical_request, calendar):
     """Read PUT requests."""
     name = name_from_path(path, calendar)
-    log.LOGGER.debug("--> Name: %s" % name)
     if name in (item.name for item in calendar.items):
         # PUT is modifying an existing item
         calendar.replace(name, ical_request)

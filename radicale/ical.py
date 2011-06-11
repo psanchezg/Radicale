@@ -33,7 +33,7 @@ import posixpath
 import time
 import uuid
 
-from radicale import config, log
+from radicale import config
 
 
 FOLDER = os.path.expanduser(config.get("storage", "folder"))

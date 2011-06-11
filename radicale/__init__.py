@@ -160,16 +160,6 @@ class Application(object):
         # Get function corresponding to method
         function = getattr(self, environ["REQUEST_METHOD"].lower())
 
-        # Resource does not exist, return 404
-        # Note: should check ACL first, otherwise this can leak information (404 vs not authorized)
-#        if not items:
-#            log.LOGGER.debug("No items: resource %s does not exist" % environ["PATH_INFO"])
-#            status = client.NOT_FOUND
-#            headers = {}
-#            status = "%i %s" % (status, client.responses.get(status, ""))
-#            start_response(status, list(headers.items()))
-#            return []
-
         # Check rights
         if not items or not self.acl:
             # No calendar or no acl, don't check rights
