@@ -33,7 +33,7 @@ import posixpath
 import time
 import uuid
 
-from radicale import config
+from radicale import config, log
 
 
 FOLDER = os.path.expanduser(config.get("storage", "folder"))
@@ -47,13 +47,13 @@ def open(path, mode="r"):
 # pylint: enable=W0622
 
 
-def serialize(headers=(), items=()):
+def serialize(headers=(), items=(), vType="VCALENDAR"):
     """Return an iCal text corresponding to given ``headers`` and ``items``."""
-    lines = ["BEGIN:VCALENDAR"]
+    lines = ["BEGIN:%s" % vType]
     for part in (headers, items):
         if part:
             lines.append("\n".join(item.text for item in part))
-    lines.append("END:VCALENDAR\n")
+    lines.append("END:%s\n" % vType)
     return "\n".join(lines)
 
 
@@ -157,8 +157,11 @@ class Timezone(Item):
     """Internal timezone class."""
     tag = "VTIMEZONE"
 
+class Card(Item):
+    """Internal vcard class."""
+    tag = "VCARD"
 
-class Calendar(object):
+class DavItem(object):
     """Internal calendar class."""
     tag = "VCALENDAR"
 
@@ -186,7 +189,7 @@ class Calendar(object):
         attributes = posixpath.normpath(path.strip("/")).split("/")
         if not attributes:
             return None
-        if attributes[-1].endswith(".ics"):
+        if attributes[-1].endswith(".ics") or attributes[-1].endswith(".vcf"):
             attributes.pop()
 
         result = []
@@ -204,18 +207,27 @@ class Calendar(object):
                     for filename in next(os.walk(abs_path))[2]:
                         file_path = os.path.join(path, filename)
                         if cls.is_vcalendar(os.path.join(abs_path, filename)):
-                            result.append(cls(file_path))
+                            result.append(Calendar(file_path))
+                        elif cls.is_vaddressbook(os.path.join(abs_path, filename)):
+                            result.append(AddressBook(file_path))
                 except StopIteration:
                     # directory does not exist yet
                     pass
         else:
             if cls.resource_exists(path):
-                calendar = cls(path)
+                if cls.is_vcalendar(abs_path):
+                    calendar = Calendar(path)
+                elif cls.is_vaddressbook(abs_path):
+                    calendar = AddressBook(path)
+                else:
+                    calendar = DavItem(path)
+
                 if depth == "0":
                     result.append(calendar)
                 else:
                     if include_container:
                         result.append(calendar)
+                    log.LOGGER.debug("--> get the components!")
                     result.extend(calendar.components)
         return result
 
@@ -232,6 +244,12 @@ class Calendar(object):
         """Return ``True`` if there is a VCALENDAR file under ``path``."""
         with open(path) as stream:
             return 'BEGIN:VCALENDAR' == stream.read(15)
+
+    @staticmethod
+    def is_vaddressbook(path):
+        """Return ``True`` if there is a VADDRESSBOOK file under ``path``."""
+        with open(path) as stream:
+            return 'BEGIN:VADDRESSBOOK' == stream.read(18)
 
     @staticmethod
     def _parse(text, item_types, name=None):
@@ -284,7 +302,7 @@ class Calendar(object):
         items = self.items
 
         for new_item in self._parse(
-            text, (Timezone, Event, Todo, Journal), name):
+            text, (Timezone, Event, Todo, Journal, Card), name):
             if new_item.name not in (item.name for item in items):
                 items.append(new_item)
 
@@ -315,7 +333,7 @@ class Calendar(object):
 
         self._create_dirs(self.path)
 
-        text = serialize(headers, items)
+        text = serialize(headers, items, self.tag)
         return open(self.path, "w").write(text)
 
     @staticmethod
@@ -356,6 +374,7 @@ class Calendar(object):
         for line in lines:
             if line.startswith("VERSION:"):
                 header_lines.append(Header(line))
+                break
 
         return header_lines
 
@@ -431,3 +450,23 @@ class Calendar(object):
     def url(self):
         """Get the standard calendar URL."""
         return ('/%s/' % self.local_path).replace('//', '/')
+
+class Calendar(DavItem):
+    """Internal calendar class."""
+    tag = "VCALENDAR"
+    content_type = "text/calendar"
+
+class AddressBook(DavItem):
+    """Internal addressbook class."""
+    tag = "VADDRESSBOOK"
+    content_type = "text/vcard"
+
+    @property
+    def items(self):
+        """Get list of all items in calendar."""
+        return self._parse(self.text, (Card,))
+
+    @property
+    def components(self):
+        """Get list of all components in addressbook."""
+        return self._parse(self.text, (Card,))

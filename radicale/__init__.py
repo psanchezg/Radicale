@@ -157,18 +157,18 @@ class Application(object):
         items = ical.Calendar.from_path(environ["PATH_INFO"],
             environ.get("HTTP_DEPTH", "0"))
 
-        # Resource does not exist, return 404
-        # Note: should check ACL first, otherwise this can leak information (404 vs not authorized)
-        if not items:
-            log.LOGGER.debug("No items: resource %s does not exist" % environ["PATH_INFO"])
-            status = client.NOT_FOUND
-            headers = {}
-            status = "%i %s" % (status, client.responses.get(status, ""))
-            start_response(status, list(headers.items()))
-            return []
-
         # Get function corresponding to method
         function = getattr(self, environ["REQUEST_METHOD"].lower())
+
+        # Resource does not exist, return 404
+        # Note: should check ACL first, otherwise this can leak information (404 vs not authorized)
+#        if not items:
+#            log.LOGGER.debug("No items: resource %s does not exist" % environ["PATH_INFO"])
+#            status = client.NOT_FOUND
+#            headers = {}
+#            status = "%i %s" % (status, client.responses.get(status, ""))
+#            start_response(status, list(headers.items()))
+#            return []
 
         # Check rights
         if not items or not self.acl:
@@ -189,7 +189,7 @@ class Application(object):
             last_allowed = False
             calendars = []
             for calendar in items:
-                if not isinstance(calendar, ical.Calendar):
+                if not isinstance(calendar, ical.DavItem):
                     if last_allowed:
                         calendars.append(calendar)
                     continue
@@ -250,7 +250,7 @@ class Application(object):
             etag = calendar.etag
 
         headers = {
-            "Content-Type": "text/calendar",
+            "Content-Type": calendar.content_type,
             "Last-Modified": calendar.last_modified,
             "ETag": etag}
         answer = answer_text.encode(self.encoding)
@@ -290,18 +290,23 @@ class Application(object):
         calendar.write()
         return client.CREATED, {}, None
 
+    def mkcol(self, environ, calendars, content):
+        """Manage MKCOL request."""
+        headers = {}
+        return client.NOT_IMPLEMENTED, headers, b"NOT_IMPLEMENTED"
+
     def options(self, environ, calendars, content):
         """Manage OPTIONS request."""
         headers = {
-            "Allow": "DELETE, HEAD, GET, MKCALENDAR, " \
+            "Allow": "DELETE, HEAD, GET, MKCALENDAR, MKCOL, " \
                 "OPTIONS, PROPFIND, PROPPATCH, PUT, REPORT",
-            "DAV": "1, calendar-access"}
+            "DAV": "1, 3, calendar-access, extended-mkcol, addressbook"}
         return client.OK, headers, None
 
     def propfind(self, environ, calendars, content):
         """Manage PROPFIND request."""
         headers = {
-            "DAV": "1, calendar-access",
+            "DAV": "1, 3, calendar-access, extend-mkcol, addressbook",
             "Content-Type": "text/xml"}
         answer = xmlutils.propfind(
             environ["PATH_INFO"], content, calendars, environ.get("USER"))
@@ -312,7 +317,7 @@ class Application(object):
         calendar = calendars[0]
         answer = xmlutils.proppatch(environ["PATH_INFO"], content, calendar)
         headers = {
-            "DAV": "1, calendar-access",
+            "DAV": "1, 3, calendar-access, extended-mkcol, addressbook",
             "Content-Type": "text/xml"}
         return client.MULTI_STATUS, headers, answer
 

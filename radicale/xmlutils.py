@@ -35,7 +35,7 @@ except ImportError:
 import re
 import xml.etree.ElementTree as ET
 
-from radicale import client, config, ical
+from radicale import client, config, ical, log
 
 
 NAMESPACES = {
@@ -185,16 +185,44 @@ def propfind(path, xml_request, calendars, user=None):
     # Writing answer
     multistatus = ET.Element(_tag("D", "multistatus"))
 
-    for calendar in calendars:
-        response = _propfind_response(path, calendar, props, user)
+    # No valid resources, return 404
+    if not calendars:
+        response = _propfind_response_404(path, props)
         multistatus.append(response)
+    else:
+        for calendar in calendars:
+            response = _propfind_response(path, calendar, props, user)
+            multistatus.append(response)
 
     return _pretty_xml(multistatus)
+
+def _propfind_response_404(path, props):
+    """Build and return a PROPFIND response where all items are not found."""
+    response = ET.Element(_tag("D", "response"))
+
+    href = ET.Element(_tag("D", "href"))
+    href.text = path
+    response.append(href)
+
+    propstat404 = ET.Element(_tag("D", "propstat"))
+    prop404 = ET.Element(_tag("D", "prop"))
+    propstat404.append(prop404)
+
+    for tag in props:
+        element = ET.Element(tag)
+        prop404.append(element)
+
+    status404 = ET.Element(_tag("D", "status"))
+    status404.text = _response(404)
+    propstat404.append(status404)
+    response.append(propstat404)
+
+    return response
 
 
 def _propfind_response(path, item, props, user):
     """Build and return a PROPFIND response."""
-    is_calendar = isinstance(item, ical.Calendar)
+    is_calendar = isinstance(item, ical.DavItem)
     if is_calendar:
         with item.props as cal_props:
             calendar_props = cal_props
@@ -218,6 +246,7 @@ def _propfind_response(path, item, props, user):
     for tag in props:
         element = ET.Element(tag)
         is404 = False
+
         if tag == _tag("D", "getetag"):
             element.text = item.etag
         elif tag == _tag("D", "principal-URL"):
@@ -267,8 +296,12 @@ def _propfind_response(path, item, props, user):
                 element.text = "text/calendar"
             elif tag == _tag("D", "resourcetype"):
                 if not item.is_principal:
-                    tag = ET.Element(_tag("C", "calendar"))
-                    element.append(tag)
+                    if isinstance(item, ical.Calendar):
+                        tag = ET.Element(_tag("C", "calendar"))
+                        element.append(tag)
+                    elif isinstance(item, ical.AddressBook):
+                        tag = ET.Element(_tag("CD", "addressbook"))
+                        element.append(tag)
                 tag = ET.Element(_tag("D", "collection"))
                 element.append(tag)
             elif tag == _tag("D", "owner") and item.owner_url:
@@ -376,6 +409,7 @@ def proppatch(path, xml_request, calendar):
 def put(path, ical_request, calendar):
     """Read PUT requests."""
     name = name_from_path(path, calendar)
+    log.LOGGER.debug("--> Name: %s" % name)
     if name in (item.name for item in calendar.items):
         # PUT is modifying an existing item
         calendar.replace(name, ical_request)
