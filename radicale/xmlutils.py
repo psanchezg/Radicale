@@ -184,7 +184,7 @@ def propfind(path, xml_request, calendars, user=None):
         root = ET.fromstring(xml_request.encode("utf8"))
 
         prop_element = root.find(_tag("D", "prop"))
-        if prop_element:
+        if prop_element is not None:
             props = [prop.tag for prop in prop_element]
             allprop = False
         elif root.find(_tag("D", "allprop")) is not None:
@@ -194,7 +194,9 @@ def propfind(path, xml_request, calendars, user=None):
             allprop = True
 
     if allprop:
-        props.extend([_tag("D", "resourcetype"), _tag("D", "displayname")])
+        props.extend([_tag("D", "resourcetype"), _tag("D", "displayname"), 
+            _tag("D", "getetag"), _tag("D", "getcontenttype"), 
+            _tag("D", "getlastmodified"), _tag("D", "getcontentlength")])
 
     # Writing answer
     multistatus = ET.Element(_tag("D", "multistatus"))
@@ -313,7 +315,7 @@ def _propfind_response(path, item, props, user, allprop = False):
             element.append(vcard)
         elif is_calendar:
             if tag == _tag("D", "getcontenttype"):
-                element.text = "text/calendar"
+                element.text = item.content_type
             elif tag == _tag("D", "resourcetype"):
                 if not item.is_principal:
                     if isinstance(item, ical.Calendar):
