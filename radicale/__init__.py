@@ -154,7 +154,7 @@ class Application(object):
             content = None
 
         # Find calendar(s)
-        items = ical.Calendar.from_path(environ["PATH_INFO"],
+        items = ical.DavItem.from_path(environ["PATH_INFO"],
             environ.get("HTTP_DEPTH", "0"))
 
         # Get function corresponding to method
@@ -269,7 +269,7 @@ class Application(object):
 
     def mkcalendar(self, environ, calendars, content):
         """Manage MKCALENDAR request."""
-        calendar = calendars[0]
+        calendar = ical.DavItem.create_calendar(environ["PATH_INFO"])
         props = xmlutils.props_from_request(content)
         timezone = props.get('C:calendar-timezone')
         if timezone:

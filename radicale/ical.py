@@ -183,6 +183,18 @@ class DavItem(object):
         self.is_principal = principal
 
     @classmethod
+    def create_calendar(cls, path):
+        attributes = posixpath.normpath(path.strip("/")).split("/")
+        if not attributes:
+            return None
+
+        path = "/".join(attributes[:min(len(attributes), 2)])
+        path = path.replace("/", os.sep)
+        abs_path = os.path.join(FOLDER, path)
+
+        return Calendar(path)
+
+    @classmethod
     def from_path(cls, path, depth="infinite", include_container=True):
         """Return a list of calendars and items under the given ``path``.
 
