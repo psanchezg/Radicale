@@ -291,6 +291,13 @@ def _propfind_response(path, item, props, user):
                 report_tag.text = report_name
                 supported.append(report_tag)
                 element.append(supported)
+        elif tag == _tag("CD", "supported-address-data"):
+            vcard = ET.Element(_tag("supported-address-data"))
+            vcard_data = ET.Element(_tag("CD", "address-data-type"))
+            vcard_data.set("content-type", "text/vcard")
+            vcard_data.set("version", "3.0")
+            vcard.append(vcard_data)
+            element.append(vcard)
         elif is_calendar:
             if tag == _tag("D", "getcontenttype"):
                 element.text = "text/calendar"
