@@ -176,11 +176,25 @@ def propfind(path, xml_request, calendars, user=None):
     Read rfc4918-9.1 for info.
 
     """
-    # Reading request
-    root = ET.fromstring(xml_request.encode("utf8"))
+    # Reading request. Empty request implies allprop (see RFC)
+    props = []
+    if not len(xml_request):
+        allprop = True
+    else:
+        root = ET.fromstring(xml_request.encode("utf8"))
 
-    prop_element = root.find(_tag("D", "prop"))
-    props = [prop.tag for prop in prop_element]
+        prop_element = root.find(_tag("D", "prop"))
+        if prop_element:
+            props = [prop.tag for prop in prop_element]
+            allprop = False
+        elif root.find(_tag("D", "allprop")) is not None:
+            allprop_include = root.find(_tag("D", "include"))
+            if allprop_include:
+                props = [prop.tag for prop in allprop_include]
+            allprop = True
+
+    if allprop:
+        props.extend([_tag("D", "resourcetype"), _tag("D", "displayname")])
 
     # Writing answer
     multistatus = ET.Element(_tag("D", "multistatus"))
@@ -191,7 +205,7 @@ def propfind(path, xml_request, calendars, user=None):
         multistatus.append(response)
     else:
         for calendar in calendars:
-            response = _propfind_response(path, calendar, props, user)
+            response = _propfind_response(path, calendar, props, user, allprop)
             multistatus.append(response)
 
     return _pretty_xml(multistatus)
@@ -219,8 +233,7 @@ def _propfind_response_404(path, props):
 
     return response
 
-
-def _propfind_response(path, item, props, user):
+def _propfind_response(path, item, props, user, allprop = False):
     """Build and return a PROPFIND response."""
     is_calendar = isinstance(item, ical.DavItem)
     if is_calendar:
@@ -329,7 +342,7 @@ def _propfind_response(path, item, props, user):
         else:
             is404 = True
 
-        if is404:
+        if is404 and not allprop:
             prop404.append(element)
         else:
             prop200.append(element)
