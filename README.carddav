@@ -1,0 +1,23 @@
+===========================
+Radicale - CardDAV support
+===========================
+
+-------
+README
+-------
+
+This file describes the *experimental* CardDAV support in Radicale. The
+basic features have been tested to work with Apple's Address Book
+application and on iOS. To get started, first create a file to store the
+addressbook, e.g. in /user/contacts. The contents should be like this:
+
+	BEGIN:VADDRESSBOOK
+	PRODID:-//Radicale//NONSGML Radicale Server//EN
+	VERSION:2.0
+	END:VADDRESSBOOK
+
+When clients do a PROPFIND request to find out the resource type,
+Radicale will tell them it is an addressbook resource. If no addressbook
+resource is found, the behaviour of the CardDAV client can be
+unexpected. For example, Apple's client uses the /user/addressbook/ URI,
+even if it does not exist.
