@@ -189,7 +189,7 @@ def propfind(path, xml_request, calendars, user=None):
             allprop = False
         elif root.find(_tag("D", "allprop")) is not None:
             allprop_include = root.find(_tag("D", "include"))
-            if allprop_include:
+            if allprop_include is not None:
                 props = [prop.tag for prop in allprop_include]
             allprop = True
 
@@ -344,7 +344,7 @@ def _propfind_response(path, item, props, user, allprop = False):
 
         if is404 and not allprop:
             prop404.append(element)
-        else:
+        elif not is404:
             prop200.append(element)
 
     status200 = ET.Element(_tag("D", "status"))
