@@ -251,6 +251,17 @@ class DavItem(object):
         return result
 
     @staticmethod
+    def delete_collection(abs_path):
+        """Remote the collection.
+
+        This deletes the file and associated .props file.
+        
+        """
+        os.unlink(abs_path)
+        os.unlink("%s.props" % abs_path)
+        return True
+
+    @staticmethod
     def resource_exists(path):
         """Check if resource ``path'' exists on disk."""
         abs_path = os.path.join(FOLDER, path.replace("/", os.sep))
@@ -354,6 +365,28 @@ class DavItem(object):
 
         text = serialize(headers, items, self.tag)
         return open(self.path, "w").write(text)
+
+    @staticmethod
+    def uri_to_path(uri):
+        """Translates uri into absolute path"""
+
+        # Remove a trailing and leading slash if it exists
+        if uri[-1:] == "/":
+            uri = uri[0:-1]
+        if uri[0] == "/":
+            uri = uri[1:]
+
+        uri = uri.replace("/", os.sep)
+        return os.path.join(FOLDER, uri)
+
+    @staticmethod
+    def uri_is_collection(uri, vType):
+        abs_path = DavItem.uri_to_path(uri)
+        if os.path.isfile(abs_path):
+            with open(abs_path) as stream:
+                return "BEGIN:%s" % vType.upper() == stream.read(len(vType) + 6)
+
+        return False
 
     @staticmethod
     def _create_dirs(path):

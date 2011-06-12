@@ -261,6 +261,16 @@ class Application(object):
             # No ETag precondition or precondition verified, delete item
             answer = xmlutils.delete(environ["PATH_INFO"], calendar)
             status = client.NO_CONTENT
+        elif ical.DavItem.uri_is_collection(environ["PATH_INFO"], "VCALENDAR") \
+                and environ.get("HTTP_DEPTH", "infinity").lower() == "infinity":
+            # Client wants to delete the entire calendar
+            # Fixme: is calendar loaded?
+            if environ.get("HTTP_IF_MATCH", calendar.etag) == calendar.etag:
+                answer = xmlutils.delete_collection(environ["PATH_INFO"])
+                status = client.NO_CONTENT
+            else:
+                answer = None
+                status = client.PRECONDITION_FAILED
         else:
             # No item or ETag precondition not verified, do not delete item
             answer = None

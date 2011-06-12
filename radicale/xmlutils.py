@@ -169,6 +169,31 @@ def delete(path, calendar):
 
     return _pretty_xml(multistatus)
 
+def delete_collection(uri):
+    """Delete the entire collection.
+
+    Only works on VCALENDAR for the moment.
+    
+    """
+    deleted = ical.DavItem.delete_collection(ical.DavItem.uri_to_path(uri))
+
+    # Writing answer
+    multistatus = ET.Element(_tag("D", "multistatus"))
+    response = ET.Element(_tag("D", "response"))
+    multistatus.append(response)
+
+    href = ET.Element(_tag("D", "href"))
+    href.text = uri
+    response.append(href)
+
+    status = ET.Element(_tag("D", "status"))
+    if deleted:
+        status.text = _response(200)
+    else:
+        status.text = _response(500)
+    response.append(status)
+
+    return _pretty_xml(multistatus)
 
 def propfind(path, xml_request, calendars, user=None):
     """Read and answer PROPFIND requests.
