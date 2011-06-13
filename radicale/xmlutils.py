@@ -195,6 +195,15 @@ def delete_collection(uri):
 
     return _pretty_xml(multistatus)
 
+
+def precondition_failed_response(namespace, prop):
+    """Generate an error message for ``PRECONDITION_FAILED''"""
+    error = ET.Element(_tag("D", "error"))
+    precondition = ET.Element(_tag(namespace, prop))
+    error.append(precondition)
+
+    return _pretty_xml(error)
+
 def propfind(path, xml_request, calendars, user=None):
     """Read and answer PROPFIND requests.
 

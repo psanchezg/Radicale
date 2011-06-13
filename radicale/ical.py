@@ -262,12 +262,15 @@ class DavItem(object):
         return True
 
     @staticmethod
-    def resource_exists(path):
-        """Check if resource ``path'' exists on disk."""
+    def resource_exists(path, isFolder = False):
+        """Check if resource ``path'' exists on disk.
+        
+        If the ``isFolder'' argument is ``True'', also check if path is a directory. 
+        """
         abs_path = os.path.join(FOLDER, path.replace("/", os.sep))
-        if not os.path.isfile(abs_path):
-            return False
-        return True
+        if os.path.isfile(abs_path) or (isFolder and os.path.isdir(abs_path)):
+            return True
+        return False
 
     @staticmethod
     def is_vcalendar(path):

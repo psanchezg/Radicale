@@ -279,6 +279,14 @@ class Application(object):
 
     def mkcalendar(self, environ, calendars, content):
         """Manage MKCALENDAR request."""
+        headers = { "Cache-Control" : "no-cache" }
+
+        # Check if resource does not exist yet
+        if ical.DavItem.resource_exists(ical.DavItem.uri_to_path(environ["PATH_INFO"]), True):
+            status = client.CONFLICT
+            answer = xmlutils.precondition_failed_response("D", "resource-must-be-null")
+            return status, headers, answer
+
         calendar = ical.DavItem.create_calendar(environ["PATH_INFO"])
         props = xmlutils.props_from_request(content)
         timezone = props.get('C:calendar-timezone')
@@ -289,7 +297,7 @@ class Application(object):
             for key, value in props.items():
                 calendar_props[key] = value
         calendar.write()
-        return client.CREATED, {}, None
+        return client.CREATED, headers, None
 
     def mkcol(self, environ, calendars, content):
         """Manage MKCOL request."""
