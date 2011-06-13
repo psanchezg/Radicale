@@ -371,11 +371,7 @@ class DavItem(object):
         """Translates uri into absolute path"""
 
         # Remove a trailing and leading slash if it exists
-        if uri[-1:] == "/":
-            uri = uri[0:-1]
-        if uri[0] == "/":
-            uri = uri[1:]
-
+        uri = str.strip(uri, "/")
         uri = uri.replace("/", os.sep)
         return os.path.join(FOLDER, uri)
 
