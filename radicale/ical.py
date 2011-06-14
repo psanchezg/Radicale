@@ -184,7 +184,8 @@ class DavItem(object):
 
     @classmethod
     def create_calendar(cls, path):
-        attributes = posixpath.normpath(path.strip("/")).split("/")
+        # First do normpath and then strip, to prevent access to FOLDER/../
+        attributes = posixpath.normpath(path).strip("/").split("/")
         if not attributes:
             return None
 
@@ -206,7 +207,8 @@ class DavItem(object):
         The ``path`` is relative to the storage folder.
 
         """
-        attributes = posixpath.normpath(path.strip("/")).split("/")
+        # First do normpath and then strip, to prevent access to FOLDER/../
+        attributes = posixpath.normpath(path).strip("/").split("/")
         if not attributes:
             return None
         if attributes[-1].endswith(".ics") or attributes[-1].endswith(".vcf"):
