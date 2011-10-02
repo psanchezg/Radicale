@@ -47,14 +47,15 @@ def open(path, mode="r"):
 # pylint: enable=W0622
 
 
-def serialize(headers=(), items=(), vType="VCALENDAR"):
+def serialize(headers=(), items=(), collection_type="VCALENDAR"):
     """Return an iCal text corresponding to given ``headers`` and ``items``."""
-    lines = ["BEGIN:%s" % vType]
+    lines = ["BEGIN:%s" % collection_type]
     for part in (headers, items):
         if part:
             lines.append("\n".join(item.text for item in part))
-    lines.append("END:%s\n" % vType)
+    lines.append("END:%s\n" % collection_type)
     return "\n".join(lines)
+
 
 def serialize_vcard(card):
     """Serialize vCard and remove internal properties."""
@@ -64,6 +65,7 @@ def serialize_vcard(card):
             continue
         lines.append(line)
     return "\n".join(lines)
+
 
 def unfold(text):
     """Unfold multi-lines attributes.
@@ -165,20 +167,34 @@ class Timezone(Item):
     """Internal timezone class."""
     tag = "VTIMEZONE"
 
+
 class Card(Item):
     """Internal vcard class."""
     tag = "VCARD"
+
 
 class DavItem(object):
     """Internal calendar class."""
     tag = "VCALENDAR"
 
     def __init__(self, path, principal=False):
-        """Initialize the calendar with ``cal`` and ``user`` parameters."""
+        """Initialize the calendar.
+
+        ``path`` must be the normalized relative path of the calendar, using
+        the slash as the folder delimiter, with no leading nor trailing slash.
+
+        """
         self.encoding = "utf-8"
         split_path = path.split("/")
-        self.owner = split_path[0] if len(split_path) > 1 else None
-        self.path = os.path.join(FOLDER, path.replace("/", os.sep)) 
+        self.path = os.path.join(FOLDER, path.replace("/", os.sep))
+        if principal and split_path and os.path.isdir(self.path):
+            # Already existing principal calendar
+            self.owner = split_path[0]
+        elif len(split_path) > 1:
+            # URL with at least one folder
+            self.owner = split_path[0]
+        else:
+            self.owner = None
         self.local_path = path if path != '.' else ''
         self.is_principal = principal
 
@@ -208,32 +224,34 @@ class DavItem(object):
 
         """
         # First do normpath and then strip, to prevent access to FOLDER/../
-        attributes = posixpath.normpath(path).strip("/").split("/")
+        sane_path = posixpath.normpath(path.replace(os.sep, "/")).strip("/")
+        attributes = sane_path.split("/")
         if not attributes:
             return None
-        if attributes[-1].endswith(".ics") or attributes[-1].endswith(".vcf"):
+        if not (os.path.isfile(os.path.join(FOLDER, *attributes)) or
+                path.endswith("/")):
             attributes.pop()
 
         result = []
 
-        path = "/".join(attributes[:min(len(attributes), 2)])
-        path = path.replace("/", os.sep)
-        abs_path = os.path.join(FOLDER, path)
-        if os.path.isdir(abs_path) or len(attributes) == 1:
+        path = "/".join(attributes)
+        abs_path = os.path.join(FOLDER, path.replace("/", os.sep))
+        principal = len(attributes) <= 1
+        if os.path.isdir(abs_path):
             if depth == "0":
-                result.append(cls(path, principal=True))
+                result.append(cls(path, principal))
             else:
                 if include_container:
-                    result.append(cls(path, principal=True))
+                    result.append(cls(path, principal))
                 try:
                     for filename in next(os.walk(abs_path))[2]:
-                        file_path = os.path.join(path, filename)
-                        if cls.is_vcalendar(os.path.join(abs_path, filename)):
+                        file_path = os.path.join(abs_path, filename)
+                        if cls.is_vcalendar(file_path):
                             result.append(Calendar(file_path))
-                        elif cls.is_vaddressbook(os.path.join(abs_path, filename)):
+                        elif cls.is_vaddressbook(file_path):
                             result.append(AddressBook(file_path))
                 except StopIteration:
-                    # directory does not exist yet
+                    # Directory does not exist yet
                     pass
         else:
             if cls.resource_exists(path):
@@ -254,20 +272,22 @@ class DavItem(object):
 
     @staticmethod
     def delete_collection(abs_path):
-        """Remote the collection.
+        """Remove the collection.
 
         This deletes the file and associated .props file.
-        
+
         """
         os.unlink(abs_path)
         os.unlink("%s.props" % abs_path)
         return True
 
     @staticmethod
-    def resource_exists(path, isFolder = False):
+    def resource_exists(path, is_folder=False):
         """Check if resource ``path'' exists on disk.
-        
-        If the ``isFolder'' argument is ``True'', also check if path is a directory. 
+
+        If the ``is_folder`` argument is ``True``, also check if path is a
+        directory.
+
         """
         abs_path = os.path.join(FOLDER, path.replace("/", os.sep))
         if os.path.isfile(abs_path) or (isFolder and os.path.isdir(abs_path)):
@@ -299,7 +319,7 @@ class DavItem(object):
         for item_type in item_types:
             item_tags[item_type.tag] = item_type
 
-        items = []
+        items = {}
 
         lines = unfold(text)
         in_item = False
@@ -318,9 +338,14 @@ class DavItem(object):
                     item_type = item_tags[item_tag]
                     item_text = "\n".join(item_lines)
                     item_name = None if item_tag == "VTIMEZONE" else name
-                    items.append(item_type(item_text, item_name))
+                    item = item_type(item_text, item_name)
+                    if item.name in items:
+                        text = "\n".join((item.text, items[item.name].text))
+                        items[item.name] = item_type(text, item.name)
+                    else:
+                        items[item.name] = item
 
-        return items
+        return list(items.values())
 
     def get_item(self, name):
         """Get calendar item called ``name``."""
@@ -359,8 +384,6 @@ class DavItem(object):
 
     def write(self, headers=None, items=None):
         """Write calendar with given parameters."""
-        if self.is_principal:
-            return
         headers = headers or self.headers or (
             Header("PRODID:-//Radicale//NONSGML Radicale Server//EN"),
             Header("VERSION:2.0"))
@@ -381,11 +404,12 @@ class DavItem(object):
         return os.path.join(FOLDER, uri)
 
     @staticmethod
-    def uri_is_collection(uri, vType):
+    def uri_is_collection(uri, collection_type):
         abs_path = DavItem.uri_to_path(uri)
         if os.path.isfile(abs_path):
             with open(abs_path) as stream:
-                return "BEGIN:%s" % vType.upper() == stream.read(len(vType) + 6)
+                content_type = stream.read(len(collection_type) + 6)
+                return content_type == "BEGIN:%s" % collection_type.upper()
 
         return False
 
@@ -495,19 +519,21 @@ class DavItem(object):
     def owner_url(self):
         """Get the calendar URL according to its owner."""
         if self.owner:
-            return ('/%s/' % self.owner).replace('//', '/')
+            return "/%s/" % self.owner
         else:
             return None
 
     @property
     def url(self):
         """Get the standard calendar URL."""
-        return ('/%s/' % self.local_path).replace('//', '/')
+        return "/%s/" % self.local_path
+
 
 class Calendar(DavItem):
     """Internal calendar class."""
     tag = "VCALENDAR"
     content_type = "text/calendar"
+
 
 class AddressBook(DavItem):
     """Internal addressbook class."""
@@ -516,10 +542,10 @@ class AddressBook(DavItem):
 
     @property
     def items(self):
-        """Get list of all items in calendar."""
+        """Get list of all items in address book."""
         return self._parse(self.text, (Card,))
 
     @property
     def components(self):
-        """Get list of all components in addressbook."""
+        """Get list of all components in address book."""
         return self._parse(self.text, (Card,))

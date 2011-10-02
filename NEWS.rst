@@ -1,21 +1,43 @@
-==========================
- Radicale - CalDAV Server
+======
+ News
+======
+
+
+0.7 - **Not released yet**
 ==========================
 
-------
- NEWS
-------
+* Support repeating events
 
-0.6 - *Not released yet*
-========================
+
+0.6.2 - Seeds
+=============
+
+* iPhone and iPad support fixed
+* Backslashes replaced by slashes in PROPFIND answers on Windows
+* PyPI archive set as default download URL
+
+
+0.6.1 - Growing Up
+==================
+
+* Example files included in the tarball
+* htpasswd support fixed
+* Redirection loop bug fixed
+* Testing message on GET requests
+
+
+0.6 - Sapling
+=============
 
 * WSGI support
 * IPv6 support
 * Smart, verbose and configurable logs
 * Apple iCal 4 and iPhone support (by Łukasz Langa)
+* KDE KOrganizer support
 * LDAP auth backend (by Corentin Le Bail)
-* Owner-less calendars (by René Neumann)
+* Public and private calendars (by René Neumann)
 * PID file
+* MOVE requests management
 * Journal entries support
 * Drop Python 2.5 support
 

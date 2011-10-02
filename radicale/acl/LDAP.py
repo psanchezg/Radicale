@@ -26,7 +26,7 @@ Authentication based on the ``python-ldap`` module
 """
 
 import ldap
-from radicale import config, log
+from radicale import acl, config, log
 
 
 BASE = config.get("acl", "ldap_base")
@@ -38,8 +38,8 @@ PASSWORD = config.get("acl", "ldap_password")
 
 def has_right(owner, user, password):
     """Check if ``user``/``password`` couple is valid."""
-    if not user or (owner and user != owner):
-        # No user given, or owner is set and is not user, forbidden
+    if not user or (owner not in acl.PRIVATE_USERS and user != owner):
+        # No user given, or owner is not private and is not user, forbidden
         return False
 
     if BINDDN and PASSWORD:
@@ -47,7 +47,8 @@ def has_right(owner, user, password):
         CONNEXION.simple_bind_s(BINDDN, PASSWORD)
 
     distinguished_name = "%s=%s" % (ATTRIBUTE, ldap.dn.escape_dn_chars(user))
-    log.LOGGER.debug("LDAP bind for %s in base %s" % (distinguished_name, BASE))
+    log.LOGGER.debug(
+        "LDAP bind for %s in base %s" % (distinguished_name, BASE))
 
     users = CONNEXION.search_s(BASE, ldap.SCOPE_ONELEVEL, distinguished_name)
     if users:
@@ -61,6 +62,6 @@ def has_right(owner, user, password):
             return True
     else:
         log.LOGGER.debug("User %s not found" % user)
-        
+
     log.LOGGER.debug("LDAP bind failed")
     return False

@@ -31,11 +31,11 @@ try:
     from collections import OrderedDict
 except ImportError:
     # Python 2.6 has no OrderedDict, use a dict instead
-    OrderedDict = dict # pylint: disable=C0103
+    OrderedDict = dict  # pylint: disable=C0103
 import re
 import xml.etree.ElementTree as ET
 
-from radicale import client, config, ical 
+from radicale import client, config, ical
 
 
 NAMESPACES = {
@@ -57,7 +57,7 @@ for short, url in NAMESPACES.items():
         ET.register_namespace("" if short == "D" else short, url)
     else:
         # ... and badly with Python 2.6 and 3.1
-        ET._namespace_map[url] = short # pylint: disable=W0212
+        ET._namespace_map[url] = short  # pylint: disable=W0212
 
 
 CLARK_TAG_REGEX = re.compile(r"""
@@ -87,7 +87,9 @@ def _pretty_xml(element, level=0):
         if level and (not element.tail or not element.tail.strip()):
             element.tail = i
     if not level:
-        return ET.tostring(element, config.get("encoding", "request"))
+        output_encoding = config.get("encoding", "request")
+        return ('<?xml version="1.0"?>\n' + ET.tostring(
+            element, "utf-8").decode("utf-8")).encode(output_encoding)
 
 
 def _tag(short_name, local):
@@ -169,11 +171,12 @@ def delete(path, calendar):
 
     return _pretty_xml(multistatus)
 
+
 def delete_collection(uri):
     """Delete the entire collection.
 
     Only works on VCALENDAR for the moment.
-    
+
     """
     deleted = ical.DavItem.delete_collection(ical.DavItem.uri_to_path(uri))
 
@@ -204,17 +207,16 @@ def precondition_failed_response(namespace, prop):
 
     return _pretty_xml(error)
 
+
 def propfind(path, xml_request, calendars, user=None):
     """Read and answer PROPFIND requests.
 
     Read rfc4918-9.1 for info.
 
     """
-    # Reading request. Empty request implies allprop (see RFC)
+    # Reading request, empty request implies allprop
     props = []
-    if not len(xml_request):
-        allprop = True
-    else:
+    if len(xml_request):
         root = ET.fromstring(xml_request.encode("utf8"))
 
         prop_element = root.find(_tag("D", "prop"))
@@ -226,10 +228,13 @@ def propfind(path, xml_request, calendars, user=None):
             if allprop_include is not None:
                 props = [prop.tag for prop in allprop_include]
             allprop = True
+    else:
+        allprop = True
 
     if allprop:
-        props.extend([_tag("D", "resourcetype"), _tag("D", "displayname"), 
-            _tag("D", "getetag"), _tag("D", "getcontenttype"), 
+        props.extend([
+            _tag("D", "resourcetype"), _tag("D", "displayname"),
+            _tag("D", "getetag"), _tag("D", "getcontenttype"),
             _tag("D", "getlastmodified"), _tag("D", "getcontentlength")])
 
     # Writing answer
@@ -245,6 +250,7 @@ def propfind(path, xml_request, calendars, user=None):
             multistatus.append(response)
 
     return _pretty_xml(multistatus)
+
 
 def _propfind_response_404(path, props):
     """Build and return a PROPFIND response where all items are not found."""
@@ -269,7 +275,8 @@ def _propfind_response_404(path, props):
 
     return response
 
-def _propfind_response(path, item, props, user, allprop = False):
+
+def _propfind_response(path, item, props, user, allprop=False):
     """Build and return a PROPFIND response."""
     is_calendar = isinstance(item, ical.DavItem)
     if is_calendar:
@@ -279,7 +286,8 @@ def _propfind_response(path, item, props, user, allprop = False):
     response = ET.Element(_tag("D", "response"))
 
     href = ET.Element(_tag("D", "href"))
-    href.text = item.url if is_calendar else path + item.name
+    uri = item.url if is_calendar else "%s/%s" % (path, item.name)
+    href.text = uri.replace("//", "/")
     response.append(href)
 
     propstat404 = ET.Element(_tag("D", "propstat"))
@@ -300,12 +308,7 @@ def _propfind_response(path, item, props, user, allprop = False):
             element.text = item.etag
         elif tag == _tag("D", "principal-URL"):
             tag = ET.Element(_tag("D", "href"))
-            if item.owner_url:
-                tag.text = item.owner_url
-            elif user:
-                tag.text = '/%s/' % user
-            else:
-                tag.text = path
+            tag.text = path
             element.append(tag)
         elif tag in (
             _tag("D", "principal-collection-set"),
@@ -351,13 +354,15 @@ def _propfind_response(path, item, props, user, allprop = False):
             if tag == _tag("D", "getcontenttype"):
                 element.text = item.content_type
             elif tag == _tag("D", "resourcetype"):
-                if not item.is_principal:
+                if item.is_principal:
+                    tag = ET.Element(_tag("D", "principal"))
+                    element.append(tag)
+                else:
                     if isinstance(item, ical.Calendar):
                         tag = ET.Element(_tag("C", "calendar"))
-                        element.append(tag)
                     elif isinstance(item, ical.AddressBook):
                         tag = ET.Element(_tag("CD", "addressbook"))
-                        element.append(tag)
+                    element.append(tag)
                 tag = ET.Element(_tag("D", "collection"))
                 element.append(tag)
             elif tag == _tag("D", "owner") and item.owner_url:
@@ -375,6 +380,9 @@ def _propfind_response(path, item, props, user, allprop = False):
         # Not for calendars
         elif tag == _tag("D", "getcontenttype"):
             element.text = "text/calendar; component=%s" % item.tag.lower()
+        elif tag == _tag("D", "resourcetype"):
+            # resourcetype must be returned empty for non-collection elements
+            pass
         else:
             is404 = True
 
@@ -486,7 +494,9 @@ def report(path, xml_request, calendar):
     props = [prop.tag for prop in prop_element]
 
     if calendar:
-        if root.tag == _tag("C", "calendar-multiget") or root.tag == _tag("CD", "addressbook-multiget"):
+        if root.tag in (
+                _tag("C", "calendar-multiget"),
+                _tag("CD", "addressbook-multiget")):
             # Read rfc4791-7.9 for info
             hreferences = set(
                 href_element.text for href_element
@@ -516,7 +526,7 @@ def report(path, xml_request, calendar):
             multistatus.append(response)
 
             href = ET.Element(_tag("D", "href"))
-            href.text = path + item.name
+            href.text = "%s/%s" % (path, item.name)
             response.append(href)
 
             propstat = ET.Element(_tag("D", "propstat"))
@@ -535,7 +545,7 @@ def report(path, xml_request, calendar):
                             calendar.headers, calendar.timezones + [item])
                 elif tag == _tag("CD", "address-data"):
                     if isinstance(item, ical.Card):
-                        element.text = ical.serialize_vcard(item) 
+                        element.text = ical.serialize_vcard(item)
                 prop.append(element)
 
             status = ET.Element(_tag("D", "status"))

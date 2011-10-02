@@ -30,7 +30,7 @@ supported, but md5 is not (see ``htpasswd`` man page to understand why).
 import base64
 import hashlib
 
-from radicale import config
+from radicale import acl, config
 
 
 FILENAME = config.get("acl", "htpasswd_filename")
@@ -52,8 +52,8 @@ def _crypt(hash_value, password):
 def _sha1(hash_value, password):
     """Check if ``hash_value`` and ``password`` match using sha1 method."""
     hash_value = hash_value.replace("{SHA}", "").encode("ascii")
-    password = password.encode(config.get("htpasswd_encoding", "stock"))
-    sha1 = hashlib.sha1() # pylint: disable=E1101
+    password = password.encode(config.get("encoding", "stock"))
+    sha1 = hashlib.sha1()  # pylint: disable=E1101
     sha1.update(password)
     return sha1.digest() == base64.b64decode(hash_value)
 
@@ -63,6 +63,6 @@ def has_right(owner, user, password):
     for line in open(FILENAME).readlines():
         if line.strip():
             login, hash_value = line.strip().split(":")
-            if login == user and (not owner or owner == user):
+            if login == user and (owner in acl.PRIVATE_USERS or owner == user):
                 return globals()["_%s" % ENCRYPTION](hash_value, password)
     return False

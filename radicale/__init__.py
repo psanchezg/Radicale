@@ -36,15 +36,15 @@ import socket
 import ssl
 import wsgiref.simple_server
 # Manage Python2/3 different modules
-# pylint: disable=F0401
+# pylint: disable=F0401,E0611
 try:
-    from http import client, server
-    import urllib.parse as urllib
+    from http import client
+    from urllib.parse import quote, unquote, urlparse
 except ImportError:
     import httplib as client
-    import BaseHTTPServer as server
-    import urllib
-# pylint: enable=F0401
+    from urllib import quote, unquote
+    from urlparse import urlparse
+# pylint: enable=F0401,E0611
 
 from radicale import acl, config, ical, log, xmlutils
 
@@ -79,6 +79,16 @@ class HTTPSServer(HTTPServer):
         """Create server by wrapping HTTP socket in an SSL socket."""
         super(HTTPSServer, self).__init__(address, handler, False)
 
+        # Test if the SSL files can be read
+        for name in ("certificate", "key"):
+            filename = config.get("server", name)
+            try:
+                open(filename, "r").close()
+            except IOError, (_, message):
+                log.LOGGER.warn(
+                    "Error while reading SSL %s %r: %s" % (
+                        name, filename, message))
+
         self.socket = ssl.wrap_socket(
             self.socket,
             server_side=True,
@@ -110,10 +120,11 @@ class Application(object):
     # pylint: disable=E0202
     @staticmethod
     def headers_log(environ):
-        """Remove environment variables from the headers for logging purpose."""
+        """Remove environment variables from the headers for logging."""
         request_environ = dict(environ)
         for shell_variable in os.environ:
-            del request_environ[shell_variable]
+            if shell_variable in request_environ:
+                del request_environ[shell_variable]
         return request_environ
     # pylint: enable=E0202
 
@@ -142,9 +153,12 @@ class Application(object):
 
     @staticmethod
     def sanitize_uri(uri):
-        """Clean URI: unquote and remove /../ to prevent access to other data."""
-        uri = posixpath.normpath(urllib.unquote(uri))
-        return uri
+        """Unquote and remove /../ to prevent access to other data."""
+        uri = unquote(uri)
+        trailing_slash = "/" if uri.endswith("/") else ""
+        uri = posixpath.normpath(uri)
+        trailing_slash = "" if uri == "/" else trailing_slash
+        return uri + trailing_slash
 
     def __call__(self, environ, start_response):
         """Manage a request."""
@@ -167,8 +181,8 @@ class Application(object):
             content = None
 
         # Find calendar(s)
-        items = ical.DavItem.from_path(environ["PATH_INFO"],
-            environ.get("HTTP_DEPTH", "0"))
+        items = ical.Calendar.from_path(
+            environ["PATH_INFO"], environ.get("HTTP_DEPTH", "0"))
 
         # Get function corresponding to method
         function = getattr(self, environ["REQUEST_METHOD"].lower())
@@ -176,7 +190,7 @@ class Application(object):
         # Check rights
         if not items or not self.acl:
             # No calendar or no acl, don't check rights
-            status, headers, answer = function(environ, items, content)
+            status, headers, answer = function(environ, items, content, None)
         else:
             # Ask authentication backend to check rights
             authorization = environ.get("HTTP_AUTHORIZATION", None)
@@ -185,32 +199,48 @@ class Application(object):
                 auth = authorization.lstrip("Basic").strip().encode("ascii")
                 user, password = self.decode(
                     base64.b64decode(auth), environ).split(":")
-                environ['USER'] = user
             else:
                 user = password = None
 
-            last_allowed = False
+            last_allowed = None
             calendars = []
             for calendar in items:
                 if not isinstance(calendar, ical.DavItem):
                     if last_allowed:
                         calendars.append(calendar)
                     continue
-                log.LOGGER.info(
-                    "Checking rights for calendar owned by %s" % (
-                        calendar.owner or "nobody"))
 
-                if self.acl.has_right(calendar.owner, user, password):
-                    log.LOGGER.info("%s allowed" % (user or "anonymous user"))
+                if calendar.owner in acl.PUBLIC_USERS:
+                    log.LOGGER.info("Public calendar")
                     calendars.append(calendar)
                     last_allowed = True
                 else:
-                    log.LOGGER.info("%s refused" % (user or "anonymous user"))
-                    last_allowed = False
+                    log.LOGGER.info(
+                        "Checking rights for calendar owned by %s" % (
+                            calendar.owner or "nobody"))
+                    if self.acl.has_right(calendar.owner, user, password):
+                        log.LOGGER.info(
+                            "%s allowed" % (user or "Anonymous user"))
+                        calendars.append(calendar)
+                        last_allowed = True
+                    else:
+                        log.LOGGER.info(
+                            "%s refused" % (user or "Anonymous user"))
+                        last_allowed = False
 
             if calendars:
-                status, headers, answer = function(environ, calendars, content)
+                # Calendars found
+                status, headers, answer = function(
+                    environ, calendars, content, user)
+            elif user and last_allowed is None:
+                # Good user and no calendars found, redirect user to home
+                location = "/%s/" % str(quote(user))
+                log.LOGGER.info("redirecting to %s" % location)
+                status = client.FOUND
+                headers = {"Location": location}
+                answer = "Redirecting to %s" % location
             else:
+                # Unknown or unauthorized user
                 status = client.UNAUTHORIZED
                 headers = {
                     "WWW-Authenticate":
@@ -224,7 +254,7 @@ class Application(object):
             headers["Content-Length"] = str(len(answer))
 
         # Start response
-        status = "%i %s" % (status, client.responses.get(status, ""))
+        status = "%i %s" % (status, client.responses.get(status, "Unknown"))
         start_response(status, list(headers.items()))
 
         # Return response content
@@ -233,8 +263,39 @@ class Application(object):
     # All these functions must have the same parameters, some are useless
     # pylint: disable=W0612,W0613,R0201
 
-    def get(self, environ, calendars, content):
+    def delete(self, environ, calendars, content, user):
+        """Manage DELETE request."""
+        calendar = calendars[0]
+        item = calendar.get_item(
+            xmlutils.name_from_path(environ["PATH_INFO"], calendar))
+        if item and environ.get("HTTP_IF_MATCH", item.etag) == item.etag:
+            # No ETag precondition or precondition verified, delete item
+            answer = xmlutils.delete(environ["PATH_INFO"], calendar)
+            status = client.NO_CONTENT
+        elif (ical.DavItem.uri_is_collection(environ["PATH_INFO"], "VCALENDAR")
+              and environ.get("HTTP_DEPTH", "infinity").lower() == "infinity"):
+            # Client wants to delete the entire calendar
+            # Fixme: is calendar loaded?
+            if environ.get("HTTP_IF_MATCH", calendar.etag) == calendar.etag:
+                answer = xmlutils.delete_collection(environ["PATH_INFO"])
+                status = client.NO_CONTENT
+            else:
+                answer = None
+                status = client.PRECONDITION_FAILED
+        else:
+            # No item or ETag precondition not verified, do not delete item
+            answer = None
+            status = client.PRECONDITION_FAILED
+        return status, {}, answer
+
+    def get(self, environ, calendars, content, user):
         """Manage GET request."""
+        # Display a "Radicale works!" message if the root URL is requested
+        if environ["PATH_INFO"] == "/":
+            headers = {"Content-type": "text/html"}
+            answer = "<!DOCTYPE html>\n<title>Radicale</title>Radicale works!"
+            return client.OK, headers, answer
+
         calendar = calendars[0]
         item_name = xmlutils.name_from_path(environ["PATH_INFO"], calendar)
         if item_name:
@@ -260,44 +321,21 @@ class Application(object):
         answer = answer_text.encode(self.encoding)
         return client.OK, headers, answer
 
-    def head(self, environ, calendars, content):
+    def head(self, environ, calendars, content, user):
         """Manage HEAD request."""
-        status, headers, answer = self.get(environ, calendars, content)
+        status, headers, answer = self.get(environ, calendars, content, user)
         return status, headers, None
 
-    def delete(self, environ, calendars, content):
-        """Manage DELETE request."""
-        calendar = calendars[0]
-        item = calendar.get_item(
-            xmlutils.name_from_path(environ["PATH_INFO"], calendar))
-        if item and environ.get("HTTP_IF_MATCH", item.etag) == item.etag:
-            # No ETag precondition or precondition verified, delete item
-            answer = xmlutils.delete(environ["PATH_INFO"], calendar)
-            status = client.NO_CONTENT
-        elif ical.DavItem.uri_is_collection(environ["PATH_INFO"], "VCALENDAR") \
-                and environ.get("HTTP_DEPTH", "infinity").lower() == "infinity":
-            # Client wants to delete the entire calendar
-            # Fixme: is calendar loaded?
-            if environ.get("HTTP_IF_MATCH", calendar.etag) == calendar.etag:
-                answer = xmlutils.delete_collection(environ["PATH_INFO"])
-                status = client.NO_CONTENT
-            else:
-                answer = None
-                status = client.PRECONDITION_FAILED
-        else:
-            # No item or ETag precondition not verified, do not delete item
-            answer = None
-            status = client.PRECONDITION_FAILED
-        return status, {}, answer
-
-    def mkcalendar(self, environ, calendars, content):
+    def mkcalendar(self, environ, calendars, content, user):
         """Manage MKCALENDAR request."""
-        headers = { "Cache-Control" : "no-cache" }
+        headers = {"Cache-Control": "no-cache"}
 
         # Check if resource does not exist yet
-        if ical.DavItem.resource_exists(ical.DavItem.uri_to_path(environ["PATH_INFO"]), True):
+        if ical.DavItem.resource_exists(
+                ical.DavItem.uri_to_path(environ["PATH_INFO"]), True):
             status = client.CONFLICT
-            answer = xmlutils.precondition_failed_response("D", "resource-must-be-null")
+            answer = xmlutils.precondition_failed_response(
+                "D", "resource-must-be-null")
             return status, headers, answer
 
         calendar = ical.DavItem.create_calendar(environ["PATH_INFO"])
@@ -317,24 +355,50 @@ class Application(object):
         headers = {}
         return client.NOT_IMPLEMENTED, headers, b"NOT_IMPLEMENTED"
 
-    def options(self, environ, calendars, content):
+    def move(self, environ, calendars, content, user):
+        """Manage MOVE request."""
+        from_calendar = calendars[0]
+        from_name = xmlutils.name_from_path(
+            environ["PATH_INFO"], from_calendar)
+        if from_name:
+            item = from_calendar.get_item(from_name)
+            if item:
+                # Move the item
+                to_url_parts = urlparse(environ["HTTP_DESTINATION"])
+                if to_url_parts.netloc == environ["HTTP_HOST"]:
+                    to_path, to_name = posixpath.split(to_url_parts.path)
+                    to_calendar = ical.Calendar.from_path(to_path)
+                    to_calendar.append(to_name, item.text)
+                    from_calendar.remove(from_name)
+                    return client.CREATED, {}, None
+                else:
+                    # Remote destination server, not supported
+                    return client.BAD_GATEWAY, {}, None
+            else:
+                # No item found
+                return client.GONE, {}, None
+        else:
+            # Moving calendars, not supported
+            return client.FORBIDDEN, {}, None
+
+    def options(self, environ, calendars, content, user):
         """Manage OPTIONS request."""
         headers = {
-            "Allow": "DELETE, HEAD, GET, MKCALENDAR, MKCOL, " \
+            "Allow": "DELETE, HEAD, GET, MKCALENDAR, MKCOL, MOVE, " \
                 "OPTIONS, PROPFIND, PROPPATCH, PUT, REPORT",
             "DAV": "1, 3, calendar-access, extended-mkcol, addressbook"}
         return client.OK, headers, None
 
-    def propfind(self, environ, calendars, content):
+    def propfind(self, environ, calendars, content, user):
         """Manage PROPFIND request."""
         headers = {
             "DAV": "1, 3, calendar-access, extend-mkcol, addressbook",
             "Content-Type": "text/xml"}
         answer = xmlutils.propfind(
-            environ["PATH_INFO"], content, calendars, environ.get("USER"))
+            environ["PATH_INFO"], content, calendars, user)
         return client.MULTI_STATUS, headers, answer
 
-    def proppatch(self, environ, calendars, content):
+    def proppatch(self, environ, calendars, content, user):
         """Manage PROPPATCH request."""
         calendar = calendars[0]
         answer = xmlutils.proppatch(environ["PATH_INFO"], content, calendar)
@@ -343,7 +407,7 @@ class Application(object):
             "Content-Type": "text/xml"}
         return client.MULTI_STATUS, headers, answer
 
-    def put(self, environ, calendars, content):
+    def put(self, environ, calendars, content, user):
         """Manage PUT request."""
         calendar = calendars[0]
         headers = {}
@@ -363,9 +427,9 @@ class Application(object):
             status = client.PRECONDITION_FAILED
         return status, headers, None
 
-    def report(self, environ, calendars, content):
+    def report(self, environ, calendars, content, user):
         """Manage REPORT request."""
-        # TODO: support multiple calendars here 
+        # TODO: support multiple calendars here
         calendar = calendars[0]
         headers = {'Content-Type': 'text/xml'}
         answer = xmlutils.report(environ["PATH_INFO"], content, calendar)
