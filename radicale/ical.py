@@ -25,6 +25,7 @@ Define the main classes of a calendar as seen from the server.
 
 """
 
+from datetime import datetime
 import codecs
 from contextlib import contextmanager
 import json
@@ -71,6 +72,20 @@ def unfold(text):
             lines.append(line)
     return lines
 
+class Rrule(object):
+    """Internal rrule item.
+    """
+    def __init__(self, rrule=None):
+        """Initialize object from rrule
+        """
+        self._rrule = rrule
+
+    @property
+    def rrule(self):
+        """Item rrule.
+
+        """
+        return self._rrule
 
 class Item(object):
     """Internal iCal item."""
@@ -78,6 +93,22 @@ class Item(object):
         """Initialize object from ``text`` and different ``kwargs``."""
         self.text = text
         self._name = name
+        self._dtstart = self._rrule = self._dtend = None
+        
+        # Extract important data to expand events
+        inevent = False
+        for line in self.text.splitlines():
+            if line.startswith("BEGIN:VEVENT"):
+                inevent = True
+            elif line.startswith("END:VEVENT"):
+                break
+            elif inevent:
+                if line.startswith("DTSTART"):
+                    self._dtstart = self._parseDate(line)
+                elif line.startswith("DTEND"):
+                    self._dtend = self._parseDate(line)
+                elif line.startswith("RRULE:"):
+                    self._rrule = Rrule(line.replace("RRULE:", "").strip())
 
         # We must synchronize the name in the text and in the object.
         # An item must have a name, determined in order by:
@@ -112,6 +143,21 @@ class Item(object):
             self.text = self.text.replace(
                 "\nEND:", "\nUID:%s\nEND:" % self._name)
 
+    def _parseDate(self, line):
+        """Parses ical datetime
+        
+        @rtype:     datetime
+        @return:    
+        """
+        # TODO: Use timezone (DTSTART;Europe/Madrid:20111017T180000)
+        dates = line.split(":")
+        if not line.endswith("Z"):
+            d = datetime.strptime(dates[1],'%Y%m%dT%H%M%S')
+        else:
+            d = datetime.strptime(dates[1],'%Y%m%dT%H%M%SZ')
+
+        return d
+
     @property
     def etag(self):
         """Item etag.
@@ -129,6 +175,24 @@ class Item(object):
 
         """
         return self._name
+
+    @property
+    def dtstart(self):
+        """Item dtstart.
+        """
+        return self._dtstart
+
+    @property
+    def dtend(self):
+        """Item dtend.
+        """
+        return self._dtend
+
+    @property
+    def rrule(self):
+        """Item rrule.
+        """
+        return self._rrule
 
 
 class Header(Item):

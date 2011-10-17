@@ -27,6 +27,8 @@ in them for XML requests (all but PUT).
 
 """
 
+from datetime import datetime, timedelta, time, date
+from dateutil.rrule import *
 try:
     from collections import OrderedDict
 except ImportError:
@@ -395,8 +397,30 @@ def report(path, xml_request, calendar):
     # Reading request
     root = ET.fromstring(xml_request.encode("utf8"))
 
+    start = end = None
+    expand = limit_recurrence_set = False
     prop_element = root.find(_tag("D", "prop"))
-    props = [prop.tag for prop in prop_element]
+    props = []
+    for prop in prop_element:
+        props.append(prop.tag)
+        for child in prop:
+            if child.tag == _tag("C", "expand"):
+                expand = True
+            elif child.tag == _tag("C", "expand"):
+                expand = limit_recurrence_set = True
+
+    filter_element = root.find(_tag("C", "filter"))
+    if filter_element is not None:
+        for c in filter_element:
+            for v in c:
+                for filter_ in v:
+                    if filter_.tag == _tag("C", "time-range"):
+                        if 'start' in filter_.keys():
+                            start = datetime.strptime(filter_.get('start'),
+                                    '%Y%m%dT%H%M%SZ')
+                        if 'end' in filter_.keys():
+                            end = datetime.strptime(filter_.get('end'),
+                                    '%Y%m%dT%H%M%SZ')
 
     if calendar:
         if root.tag == _tag("C", "calendar-multiget"):
@@ -423,6 +447,49 @@ def report(path, xml_request, calendar):
             # Reference is a calendar
             path = hreference
             items = calendar.components
+
+        new_items = []
+        if expand:
+            # Expand events
+            for item in items:
+                if item.rrule and end:
+                    i = -1
+                    for dtstart in rrulestr(item.rrule.rrule,
+                            dtstart = item.dtstart):
+                        if dtstart >= end:
+                            break
+
+                        if not start or dtstart > start:
+                            i += 1
+                            text = item.text
+                            if i > 0:
+                                text = re.sub(r"RRULE:.*\n",
+                                        r"RECURRENCE-ID:%s\n" % \
+                                        item.dtstart.strftime("%Y%m%dT%H%M%SZ"),
+                                        text)
+                                text = re.sub(r"SUMMARY:(.*)\n",
+                                        r"SUMMARY:\1 (#%d)\n" % (i+1), text)
+
+                            if not limit_recurrence_set:
+                                # Remove rrule line
+                                text = re.sub(r"RRULE:.*\n", "", text)
+
+                            # Update start and end dates
+                            dtend = dtstart + (item.dtend - item.dtstart)
+                            text = re.sub(r"DTSTART:.*\n", "DTSTART:%s\n" % \
+                                    dtstart.strftime("%Y%m%dT%H%M%SZ"), text)
+                            text = re.sub(r"DTEND:.*\n", "DTEND:%s\n" % \
+                                    dtend.strftime("%Y%m%dT%H%M%SZ"), text)
+                            new_items.append(ical.Event(text, item.name))
+
+                else:
+                    if (not start or start < item.dtstart) and \
+                            (not end or end > item.dtstart):
+                        new_items.append(item)
+
+        # Order events by start date
+        if len(new_items) > 0:
+            items = sorted(new_items, key=lambda item: item.dtstart)
 
         for item in items:
             response = ET.Element(_tag("D", "response"))
